@@ -693,6 +693,19 @@ ifdef CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE_O3
 KBUILD_CFLAGS += -O3 -march=armv8-a+crc+crypto
 ifdef CONFIG_CC_IS_CLANG
 OPT_FLAGS       += -mtune=cortex-a53
+ifdef CONFIG_LLVM_POLLY
+POLLY_FLAGS := -mllvm -polly \
+	     -mllvm -polly-run-dce \
+	     -mllvm -polly-run-inliner \
+	     -mllvm -polly-opt-fusion=max \
+	     -mllvm -polly-ast-use-context \
+	     -mllvm -polly-detect-keep-going \
+	     -mllvm -polly-vectorizer=stripmine \
+	     -mllvm -polly-invariant-load-hoisting
+
+OPT_FLAGS	+= $(POLLY_FLAGS)
+KBUILD_LDFLAGS	+= $(POLLY_FLAGS)
+endif
 else ifdef CONFIG_CC_IS_GCC
 OPT_FLAGS       += -mtune=cortex-a73.cortex-a53
 endif
