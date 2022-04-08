@@ -22,6 +22,7 @@
  *  distribution for more details.
  */
 
+#include <linux/binfmts.h>
 #include <linux/cpu.h>
 #include <linux/cpumask.h>
 #include <linux/cpuset.h>
@@ -136,6 +137,13 @@ struct cpuset {
 	/* for custom sched domain */
 	int relax_domain_level;
 };
+
+#ifdef CONFIG_CPUSETS_ASSIST
+struct cs_target {
+	const char *name;
+	char *cpus;
+};
+#endif
 
 static inline struct cpuset *css_cs(struct cgroup_subsys_state *css)
 {
@@ -1718,11 +1726,6 @@ static ssize_t cpuset_write_resmask(struct kernfs_open_file *of,
 	struct cpuset *trialcs;
 	int retval = -ENODEV;
 
-#ifndef CONFIG_CPUSETS_ASSIST
-	/* Don't call strstrip here because buf is read-only */
-	buf = strstrip(buf);
-#endif
-
 	/*
 	 * CPU or memory hotunplug may leave @cs w/o any execution
 	 * resources, in which case the hotplug code asynchronously updates
@@ -1779,33 +1782,40 @@ out_unlock:
 	return retval ?: nbytes;
 }
 
+#ifdef CONFIG_CPUSETS_ASSIST
+static ssize_t cpuset_write_resmask_assist(struct kernfs_open_file *of,
+					   struct cs_target tgt, size_t nbytes,
+					   loff_t off)
+{
+	pr_info("cpuset_assist: setting %s to %s\n", tgt.name, tgt.cpus);
+	return cpuset_write_resmask(of, tgt.cpus, nbytes, off);
+}
+#endif
+
 static ssize_t cpuset_write_resmask_wrapper(struct kernfs_open_file *of,
 					 char *buf, size_t nbytes, loff_t off)
 {
 #ifdef CONFIG_CPUSETS_ASSIST
-	int i;
+	static struct cs_target cs_targets[] = {
+		/* Little-only cpusets go first */
+		{ "background",		CONFIG_CPUSETS_BG },
+		{ "camera-daemon",	CONFIG_CPUSETS_CAMERA },
+		{ "foreground",		CONFIG_CPUSETS_FG },
+		{ "top-app",		CONFIG_CPUSETS_TOP_APP },
+		{ "restricted",		CONFIG_CPUSETS_RESTRICTED },
+		{ "system-background",	CONFIG_CPUSETS_SYSTEM_BG },
+	};
+	
 	struct cpuset *cs = css_cs(of_css(of));
-	struct c_data {
-		char *c_name;
-		char *c_cpus;
-	};
-	struct c_data c_targets[6] = {
-		/* Silver only cpusets go first */
-		{ "background",			"0-2"},//0-1
-		{ "camera-daemon",		"0-3,6-7"},//0-7
-		{ "foreground",			"0-5"},//0-2,4-7
-		{ "top-app",			"0-7"},//0-7
-		{ "restricted",			"0-5"},//0-7
-		{ "system-background",	"0-3"},//0-2
-	};
+	int i;
 
-	if (!strcmp(current->comm, "init")) {
-		for (i = 0; i < ARRAY_SIZE(c_targets); i++) {
-			if (!strcmp(cs->css.cgroup->kn->name, c_targets[i].c_name)) {
-				strcpy(buf, c_targets[i].c_cpus);
-				pr_info("%s: setting to %s\n", c_targets[i].c_name, buf);
-				break;
-			}
+	if (task_is_booster(current)) {
+		for (i = 0; i < ARRAY_SIZE(cs_targets); i++) {
+			struct cs_target tgt = cs_targets[i];
+
+			if (!strcmp(cs->css.cgroup->kn->name, tgt.name))
+				return cpuset_write_resmask_assist(of, tgt,
+								   nbytes, off);
 		}
 	}
 #endif
